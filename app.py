@@ -43,8 +43,60 @@ def handle_query(user_query: str, wardrobe_choice: str) -> tuple[str, str, str]:
            string and return it along with session["outfit_suggestion"] and
            session["fit_card"].
     """
-    # TODO: implement this function
-    return "Agent not yet implemented.", "", ""
+    if not user_query or not user_query.strip():
+        return "Please enter a search query.", "", ""
+
+    wardrobe = (
+        get_example_wardrobe()
+        if wardrobe_choice == "Example wardrobe"
+        else get_empty_wardrobe()
+    )
+
+    try:
+        session = run_agent(user_query.strip(), wardrobe)
+    except Exception as e:
+        return f"Something went wrong: {e}", "", ""
+
+    if session["error"]:
+        return session["error"], "", ""
+
+    # Format the top listing into a readable card
+    item = session["selected_item"]
+    if item is None:
+        return "No listing was selected — please try a different query.", "", ""
+    verdict = session.get("price_verdict")
+
+    price_line = f"${item['price']:.2f}"
+    if verdict:
+        badge = {"good deal": "✅ Good deal", "fair": "✔ Fair price", "overpriced": "⚠️ Overpriced"}
+        price_line += f"  —  {badge.get(verdict['verdict'], verdict['verdict'])} (avg ${verdict['avg_price']:.2f})"
+        if verdict["verdict"] == "overpriced" and verdict["cheaper_alternatives"]:
+            alts = "  |  ".join(
+                f"{a['title']} (${a['price']:.2f} on {a['platform']})"
+                for a in verdict["cheaper_alternatives"]
+            )
+            price_line += f"\nCheaper alternatives: {alts}"
+
+    tags = ", ".join(item.get("style_tags", []))
+    colors = ", ".join(item.get("colors", []))
+    brand = item.get("brand") or "Unknown brand"
+
+    listing_text = (
+        f"{item['title']}\n"
+        f"{'─' * 40}\n"
+        f"Platform : {item['platform'].title()}\n"
+        f"Price    : {price_line}\n"
+        f"Size     : {item['size']}\n"
+        f"Condition: {item['condition'].title()}\n"
+        f"Category : {item['category'].title()}\n"
+        f"Brand    : {brand}\n"
+        f"Colors   : {colors}\n"
+        f"Tags     : {tags}\n"
+        f"{'─' * 40}\n"
+        f"{item['description']}"
+    )
+
+    return listing_text, session["outfit_suggestion"], session["fit_card"]
 
 
 # ── interface ─────────────────────────────────────────────────────────────────

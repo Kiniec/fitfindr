@@ -18,7 +18,16 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
-from tools import search_listings, suggest_outfit, create_fit_card
+import re
+
+from tools import (
+    create_fit_card,
+    popular_trends,
+    price_comparison,
+    search_listings,
+    style_profile,
+    suggest_outfit,
+)
 
 
 # ── session state ─────────────────────────────────────────────────────────────
@@ -36,13 +45,63 @@ def _new_session(query: str, wardrobe: dict) -> dict:
     return {
         "query": query,              # original user query
         "parsed": {},                # extracted description / size / max_price
+        "style_profile": {},         # loaded user style preferences (size, preferred tags/categories)
         "search_results": [],        # list of matching listing dicts
-        "selected_item": None,       # top result, passed into suggest_outfit
+        "selected_item": None,       # top result, passed into suggest_outfit and price_comparison
         "wardrobe": wardrobe,        # user's wardrobe dict
+        "price_verdict": None,       # dict from price_comparison: verdict, avg_price, cheaper_alternatives
         "outfit_suggestion": None,   # string returned by suggest_outfit
+        "trending_tags": [],         # list[str] of trending style tags from popular_trends
         "fit_card": None,            # string returned by create_fit_card
         "error": None,               # set if the interaction ended early
     }
+
+
+# ── query parser ─────────────────────────────────────────────────────────────
+
+def _parse_query(query: str, profile: dict) -> dict:
+    """
+    Extract description, size, and max_price from a natural language query.
+    Falls back to values stored in the style profile when the query omits them.
+
+    Returns a dict with keys: description (str), size (str|None), max_price (float|None).
+    """
+    text = query.lower()
+
+    # max_price — matches "under $30", "under 30", "less than $25", "max $40"
+    price_match = re.search(
+        r'(?:under|less than|max(?:imum)?)\s+\$?(\d+(?:\.\d+)?)', text
+    )
+    max_price = float(price_match.group(1)) if price_match else None
+
+    # size — matches "size M", "size XL", or a standalone token (S/M/L/XL/XXL etc.)
+    # Negative lookbehind (?<![a-z0-9']) blocks matches inside contractions
+    # (e.g. "what's") and inside longer words (e.g. "sneakers", "mostly").
+    size_match = re.search(
+        r'\bsize\s+([a-z0-9/]+)\b|(?<![a-z0-9\'])(x{0,2}s|x{0,2}l|x{0,3}l|s/m|m/l|small|medium|large)(?![a-z0-9])',
+        text,
+    )
+    if size_match:
+        raw = (size_match.group(1) or size_match.group(2)).strip()
+        size = raw.upper()
+    else:
+        size = profile.get("size")  # fall back to saved profile
+
+    # description — strip price and size clauses, filler phrases, then normalise
+    description = re.sub(
+        r'(?:under|less than|max(?:imum)?)\s+\$?\d+(?:\.\d+)?', '', text
+    )
+    description = re.sub(
+        r'\bsize\s+[a-z0-9/]+|(?<![a-z0-9\'])(?:x{0,2}s|x{0,2}l|x{0,3}l|s/m|m/l|small|medium|large)(?![a-z0-9])',
+        '', description,
+    )
+    description = re.sub(
+        r"\b(?:i'?m?\s+)?(?:looking for|searching for|find me|show me|i want)\b",
+        '', description,
+    )
+    description = ' '.join(description.split()).strip()
+
+    return {"description": description, "size": size, "max_price": max_price}
 
 
 # ── planning loop ─────────────────────────────────────────────────────────────
@@ -92,9 +151,86 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 1 — load style profile; use saved size/tags as fallback defaults
+    session["style_profile"] = style_profile("load")
+
+    # Step 2 — parse the query into description, size, max_price
+    session["parsed"] = _parse_query(query, session["style_profile"])
+
+    # Step 3 — search listings, with up to two retries loosening constraints
+    desc = session["parsed"]["description"]
+    size = session["parsed"]["size"]
+    max_price = session["parsed"]["max_price"]
+
+    results = search_listings(desc, size=size, max_price=max_price)
+
+    if results is None:
+        session["error"] = "Something went wrong loading listings. Please try again."
+        return session
+
+    if not results and size is not None:
+        results = search_listings(desc, size=None, max_price=max_price)
+
+    if not results and max_price is not None:
+        results = search_listings(desc, size=None, max_price=None)
+
+    if not results:
+        parts = []
+        if max_price is not None:
+            parts.append(f"under ${max_price:.0f}")
+        if size is not None:
+            parts.append(f"in size {size}")
+        qualifier = " " + " ".join(parts) if parts else ""
+        session["error"] = (
+            f"No listings found{qualifier}. Want me to broaden the search?"
+        )
+        return session
+
+    session["search_results"] = results
+    session["selected_item"] = results[0]
+
+    # Step 4 — price comparison (optional; skip gracefully if no comparables)
+    session["price_verdict"] = price_comparison(session["selected_item"])
+
+    # Step 5 — suggest outfit
+    item = session["selected_item"]
+    if not wardrobe.get("items"):
+        session["error"] = (
+            "Your wardrobe is empty — add items or I can style this piece on its own."
+        )
+        return session
+
+    session["outfit_suggestion"] = suggest_outfit(item, wardrobe)
+
+    if session["outfit_suggestion"] is None:
+        session["error"] = (
+            "No strong match in your wardrobe for this item. "
+            "Try adding more pieces, or broaden the style tags."
+        )
+        return session
+
+    # Step 6 — popular trends (optional); flag trending tags in the outfit context
+    session["trending_tags"] = popular_trends(
+        category=item.get("category"),
+        size=item.get("size"),
+    )
+    outfit_context = session["outfit_suggestion"]
+    if session["trending_tags"]:
+        shared = set(item.get("style_tags", [])) & set(session["trending_tags"])
+        if shared:
+            outfit_context = (
+                f"[Trending now: {', '.join(shared)}] " + outfit_context
+            )
+
+    # Step 7 — create fit card
+    session["fit_card"] = create_fit_card(outfit_context, item)
+
+    if session["fit_card"] is None:
+        session["error"] = "I couldn't build a fit card — outfit data is incomplete."
+        return session
+
     return session
 
 
