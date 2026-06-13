@@ -2,9 +2,6 @@
 
 This starter kit contains everything you need to begin Project 2.
 
-## Domain
-
-
 ## What's Included
 
 ```
