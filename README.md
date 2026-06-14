@@ -84,6 +84,8 @@ The function will return matching items  that does not exceed max_price from que
 **What happens if it fails or returns nothing:**
 
 The agent should be able to return an empty [] and notify user "No listings found [under `{max_price}`] [in size `{ size }`]. Want me to broaden the search? ". If the tool itself fails (e.g., data cannot be loaded), return None.
+
+
 ---
 
 ### Tool 2: suggest_outfit

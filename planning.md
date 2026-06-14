@@ -29,8 +29,11 @@ This tool searches the mock secondhand listings of data from the listings.json f
 The function will return matching items  that does not exceed max_price from query with fields of `id`, `title`, `description`, `category`, `style_tags`, `condition`, `price`, `colors`, `brand`, `platform`. 
 
 **What happens if it fails or returns nothing:**
+
 <!-- What should the agent do if no listings match? -->
+
 The agent should be able to return an empty [] and notify user "No listings found [under `{max_price}`] [in size `{ size }`]. Want me to broaden the search? ". If the tool itself fails (e.g., data cannot be loaded), return None.
+
 ---
 
 ### Tool 2: suggest_outfit
@@ -190,7 +193,7 @@ For each tool, describe the specific failure mode you're handling and what the a
      sketch are all fine. You'll share this diagram with an AI tool when asking it to implement
      the planning loop and each individual tool. -->
 
-User query
+ User query
     │
     ▼
 Planning Loop
@@ -239,7 +242,8 @@ search_listings(description, size, max_price)
                                                       └── fit_card (str)
                                                                 │
                                                                 ▼
-                                                       Return fit card to user ✓
+                                                       Return fit card to user ✓ 
+
 ---
 
 ## AI Tool Plan
