@@ -169,7 +169,7 @@ Saves and retrieves a user's style preferences (sizes, preferred tags, categorie
 
 **What it returns:**
 
-The saved(`saved`) or loaded(`load`) profile dict, `_profile_store`, stored in `tools.py`, or an empty profile template if none exists will persists over the duration of the session. The dict resets at the begin of new session.
+The saved(`saved`) or loaded(`load`) profile dict, `_profile_store`, stored in `tools.py`, or an empty profile template if none exists will persists over the duration of the session. The dict resets at the begin of new session  if it is a new user.
 
 **Storage approach:**
 
